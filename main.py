@@ -11,7 +11,7 @@ st.set_page_config(page_title="100x Gem Finder", layout="wide")
 st.title("🚀 AI-Powered 100x Gem Crypto Finder")
 
 # Step 1: Fetch data from GMGN.ai API
-GMGN_API_TRENDING = "https://gmgn.ai/api/trending"
+GMGN_API_TRENDING = "https://gmgn.ai/sol/token"
 
 def fetch_data():
     response = requests.get(GMGN_API_TRENDING)
