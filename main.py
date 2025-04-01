@@ -17,7 +17,10 @@ def fetch_data():
     response = requests.get(GMGN_API_TRENDING)
     if response.status_code == 200:
         return response.json()
-    return None
+    else:
+        st.error(f"Failed to fetch data. Status Code: {response.status_code}")
+        st.write(response.text)  # This will show the error message returned by the API
+        return None
 
 data = fetch_data()
 if data is None:
