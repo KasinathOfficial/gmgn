@@ -2,19 +2,20 @@ import streamlit as st
 import requests
 import pandas as pd
 import time
-import pickle
-import numpy as np
-from sklearn.ensemble import RandomForestClassifier
+import random  # Simulating win probability for now; later, replace with AI model
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
-from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_absolute_error
 import joblib
+import numpy as np
 
-# Set up Streamlit app
-st.set_page_config(page_title="Crypto Explosion Predictor with AI", layout="wide")
-st.title("🚀 Crypto Explosion Predictor with Dynamic ML Model")
+st.set_page_config(page_title="Crypto Explosion Predictor", layout="wide")
+st.title("🚀 Crypto Explosion Predictor")
 
-# Function to fetch live data from CoinDCX
+# Placeholder for model loading and training
+model_target = None
+model_stoploss = None
+
 def fetch_coindcx_data():
     url = "https://api.coindcx.com/exchange/ticker"
     try:
@@ -25,79 +26,55 @@ def fetch_coindcx_data():
     except requests.RequestException:
         return []
 
-# Function to calculate target price based on price, change, and volume
-def calculate_target_price(price, change, volume):
-    fib_multiplier = 1.618
-    volatility_factor = 1 + (volume / 10000000)
-    return round(price * (1 + ((change / 100) * fib_multiplier * volatility_factor)), 2)
+def fetch_historical_data():
+    # Function to fetch or load historical data for training the model (this could be pre-collected data)
+    data = pd.read_csv('historical_crypto_data.csv')  # Placeholder for actual historical data CSV
+    return data
 
-# Function to calculate stop loss based on price and change
-def calculate_stop_loss(price, change):
-    stop_loss_factor = 0.95 if change > 8 else 0.90
-    return round(price * stop_loss_factor, 2)
-
-# Function to calculate volatility based on price change and volume
-def calculate_volatility(change, volume):
-    return round(abs(change) * (1 + (volume / 10000000)), 2)
-
-# Dynamic Model Training
 def train_model(data):
-    features = []
-    labels = []
+    # Use RandomForestRegressor to train models for predicting Target Price and Stop Loss
+    X = data[['price', 'change_24_hour', 'volume', 'volatility']]  # Features
+    y_target = data['target_price']  # Target price column in historical data
+    y_stoploss = data['stop_loss']  # Stop loss column in historical data
 
-    for coin in data:
-        try:
-            price = float(coin['last_price'])
-            volume = float(coin['volume'])
-            change = float(coin['change_24_hour'])
-            target_price = calculate_target_price(price, change, volume)
-            stop_loss_price = calculate_stop_loss(price, change)
-            volatility = calculate_volatility(change, volume)
+    # Split data into training and testing sets
+    X_train, X_test, y_target_train, y_target_test = train_test_split(X, y_target, test_size=0.2, random_state=42)
+    X_train, X_test, y_stoploss_train, y_stoploss_test = train_test_split(X, y_stoploss, test_size=0.2, random_state=42)
 
-            # Creating the feature set for training
-            features.append([price, volume, change, volatility])
-            label = 1 if change > 10 and volume > 500000 else 0  # Label: 1 for potential explosion, 0 for no
-            labels.append(label)
+    # Initialize and train the Random Forest models
+    model_target = RandomForestRegressor(n_estimators=100, random_state=42)
+    model_target.fit(X_train, y_target_train)
 
-        except (ValueError, KeyError):
-            continue
-    
-    if len(features) > 0:
-        # Split into training and test sets
-        X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.2, random_state=42)
-        
-        # Standardize features
-        scaler = StandardScaler()
-        X_train = scaler.fit_transform(X_train)
-        X_test = scaler.transform(X_test)
-        
-        # Initialize the model (Random Forest)
-        model = RandomForestClassifier(n_estimators=100, random_state=42)
-        model.fit(X_train, y_train)
+    model_stoploss = RandomForestRegressor(n_estimators=100, random_state=42)
+    model_stoploss.fit(X_train, y_stoploss_train)
 
-        # Evaluate the model
-        y_pred = model.predict(X_test)
-        accuracy = accuracy_score(y_test, y_pred)
-        
-        # Save the trained model
-        joblib.dump(model, 'crypto_explosion_model.pkl')
-        joblib.dump(scaler, 'scaler.pkl')
+    # Predict and calculate MAE (Mean Absolute Error) to assess the model's performance
+    target_pred = model_target.predict(X_test)
+    stoploss_pred = model_stoploss.predict(X_test)
 
-        st.write(f"Model Accuracy: {accuracy * 100:.2f}%")
-        return model, scaler
-    else:
-        return None, None
+    target_mae = mean_absolute_error(y_target_test, target_pred)
+    stoploss_mae = mean_absolute_error(y_stoploss_test, stoploss_pred)
 
-# AI-based prediction function (using the trained model)
-def predict_price_explosion(model, scaler, price, volume, change, volatility):
-    features = np.array([[price, volume, change, volatility]])
-    features = scaler.transform(features)  # Standardize features using the saved scaler
-    prediction = model.predict(features)  # Predict whether it will explode (1 or 0)
-    probability = model.predict_proba(features)[:, 1]  # Probability of explosion
-    return prediction[0], round(probability[0] * 100, 2)
+    st.write(f"Target Price Model MAE: {target_mae}")
+    st.write(f"Stop Loss Model MAE: {stoploss_mae}")
 
-# Analyze the market using live data and apply the AI prediction
-def analyze_market(model, scaler, data):
+    # Save the trained models
+    joblib.dump(model_target, 'model_target.pkl')
+    joblib.dump(model_stoploss, 'model_stoploss.pkl')
+
+def load_models():
+    global model_target, model_stoploss
+    model_target = joblib.load('model_target.pkl')
+    model_stoploss = joblib.load('model_stoploss.pkl')
+
+def calculate_win_probability(change, volume):
+    base_win_rate = 50  # Base probability of a trade winning (can be adjusted)
+    momentum_boost = min(change * 2, 20)  # More change = Higher probability (Capped at 20%)
+    volume_boost = min((volume / 10000000) * 10, 30)  # More volume = Higher probability (Capped at 30%)
+    total_probability = base_win_rate + momentum_boost + volume_boost
+    return round(min(total_probability, 95), 2)  # Capping at 95% confidence
+
+def analyze_market(data):
     potential_explosions = []
     for coin in data:
         try:
@@ -105,46 +82,44 @@ def analyze_market(model, scaler, data):
             price = float(coin['last_price'])
             volume = float(coin['volume'])
             change = float(coin['change_24_hour'])
+            volatility = abs(change) * (1 + (volume / 10000000))
 
             if change > 5 and volume > 500000:  # Trade filter
-                target_price = calculate_target_price(price, change, volume)
-                stop_loss_price = calculate_stop_loss(price, change)
-                volatility = calculate_volatility(change, volume)
+                # Predict Target Price and Stop Loss using the ML models
+                features = np.array([[price, change, volume, volatility]])
+                target_price_pred = model_target.predict(features)[0]
+                stop_loss_pred = model_stoploss.predict(features)[0]
 
-                # AI Prediction
-                prediction, probability = predict_price_explosion(model, scaler, price, volume, change, volatility)
+                # Calculate win probability
+                win_probability = calculate_win_probability(change, volume)
 
-                if prediction == 1:
-                    trade_decision = f"🔥 High Confidence Buy (Explosive Probability: {probability}%)"
+                if win_probability > 80:
+                    trade_decision = f"🔥 High Confidence Buy (Win %: {win_probability}%)"
+                elif win_probability > 65:
+                    trade_decision = f"✅ Strong Buy (Win %: {win_probability}%)"
                 else:
-                    trade_decision = f"⚠️ Low Confidence (Explosive Probability: {probability}%)"
+                    trade_decision = f"⚠️ Moderate Buy (Win %: {win_probability}%)"
 
                 potential_explosions.append({
                     "Symbol": symbol, "Price": price, "24h Change (%)": change,
                     "Volume": volume, "Volatility (%)": volatility,
-                    "Target Price": target_price, "Stop Loss Price": stop_loss_price,
-                    "Explosive Probability (%)": probability, "Trade Decision": trade_decision
+                    "Target Price": target_price_pred, "Stop Loss Price": stop_loss_pred,
+                    "Win Probability (%)": win_probability, "Trade Decision": trade_decision
                 })
         except (ValueError, KeyError):
             continue
     return potential_explosions
 
-# Load the model if it exists
-try:
-    model = joblib.load('crypto_explosion_model.pkl')
-    scaler = joblib.load('scaler.pkl')
-except:
-    model, scaler = None, None
-
-# Streamlit dynamic updates
 placeholder = st.empty()
+if not model_target or not model_stoploss:
+    train_model(fetch_historical_data())  # Train models if not already loaded
+
+load_models()  # Load pre-trained models for prediction
 
 while True:
     data = fetch_coindcx_data()
-    
-    # Retrain the model with new data periodically
-    if data and model and scaler:
-        analyzed_data = analyze_market(model, scaler, data)
+    if data:
+        analyzed_data = analyze_market(data)
         if analyzed_data:
             df = pd.DataFrame(analyzed_data)
             with placeholder.container():
@@ -154,9 +129,7 @@ while True:
             with placeholder.container():
                 st.info("No potential explosive cryptos detected right now.")
     else:
-        # If model is not available, train it
-        st.write("Training model with live data...")
-        model, scaler = train_model(data)
+        with placeholder.container():
+            st.error("Failed to retrieve data. Please check API access.")
     
-    # Sleep to control update frequency
-    time.sleep(60)  # Retrain every minute (or set based on your requirements)
+    time.sleep(1)  # Refresh data every second without refreshing the page
