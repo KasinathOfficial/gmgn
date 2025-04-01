@@ -1,74 +1,162 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
 import requests
+import pandas as pd
+import time
+import pickle
+import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import StandardScaler
+import joblib
 
-# Set up Streamlit
-st.set_page_config(page_title="100x Gem Finder", layout="wide")
-st.title("🚀 AI-Powered 100x Gem Crypto Finder")
+# Set up Streamlit app
+st.set_page_config(page_title="Crypto Explosion Predictor with AI", layout="wide")
+st.title("🚀 Crypto Explosion Predictor with Dynamic ML Model")
 
-# Step 1: Fetch data from GMGN.ai API
-GMGN_API_TRENDING = "https://gmgn.ai/?chain=sol"
+# Function to fetch live data from CoinDCX
+def fetch_coindcx_data():
+    url = "https://api.coindcx.com/exchange/ticker"
+    try:
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        return [coin for coin in data if coin['market'].endswith('INR')]  # Filter INR pairs
+    except requests.RequestException:
+        return []
 
-def fetch_data():
-    response = requests.get(GMGN_API_TRENDING)
-    if response.status_code == 200:
-        return response.json()
+# Function to calculate target price based on price, change, and volume
+def calculate_target_price(price, change, volume):
+    fib_multiplier = 1.618
+    volatility_factor = 1 + (volume / 10000000)
+    return round(price * (1 + ((change / 100) * fib_multiplier * volatility_factor)), 2)
+
+# Function to calculate stop loss based on price and change
+def calculate_stop_loss(price, change):
+    stop_loss_factor = 0.95 if change > 8 else 0.90
+    return round(price * stop_loss_factor, 2)
+
+# Function to calculate volatility based on price change and volume
+def calculate_volatility(change, volume):
+    return round(abs(change) * (1 + (volume / 10000000)), 2)
+
+# Dynamic Model Training
+def train_model(data):
+    features = []
+    labels = []
+
+    for coin in data:
+        try:
+            price = float(coin['last_price'])
+            volume = float(coin['volume'])
+            change = float(coin['change_24_hour'])
+            target_price = calculate_target_price(price, change, volume)
+            stop_loss_price = calculate_stop_loss(price, change)
+            volatility = calculate_volatility(change, volume)
+
+            # Creating the feature set for training
+            features.append([price, volume, change, volatility])
+            label = 1 if change > 10 and volume > 500000 else 0  # Label: 1 for potential explosion, 0 for no
+            labels.append(label)
+
+        except (ValueError, KeyError):
+            continue
+    
+    if len(features) > 0:
+        # Split into training and test sets
+        X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.2, random_state=42)
+        
+        # Standardize features
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_test = scaler.transform(X_test)
+        
+        # Initialize the model (Random Forest)
+        model = RandomForestClassifier(n_estimators=100, random_state=42)
+        model.fit(X_train, y_train)
+
+        # Evaluate the model
+        y_pred = model.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
+        
+        # Save the trained model
+        joblib.dump(model, 'crypto_explosion_model.pkl')
+        joblib.dump(scaler, 'scaler.pkl')
+
+        st.write(f"Model Accuracy: {accuracy * 100:.2f}%")
+        return model, scaler
     else:
-        st.error(f"Failed to fetch data. Status Code: {response.status_code}")
-        st.write(response.text)  # This will show the error message returned by the API
-        return None
+        return None, None
 
-data = fetch_data()
-if data is None:
-    st.error("Error fetching data from GMGN.ai")
-    st.stop()
+# AI-based prediction function (using the trained model)
+def predict_price_explosion(model, scaler, price, volume, change, volatility):
+    features = np.array([[price, volume, change, volatility]])
+    features = scaler.transform(features)  # Standardize features using the saved scaler
+    prediction = model.predict(features)  # Predict whether it will explode (1 or 0)
+    probability = model.predict_proba(features)[:, 1]  # Probability of explosion
+    return prediction[0], round(probability[0] * 100, 2)
 
-df = pd.DataFrame(data)
+# Analyze the market using live data and apply the AI prediction
+def analyze_market(model, scaler, data):
+    potential_explosions = []
+    for coin in data:
+        try:
+            symbol = coin['market']
+            price = float(coin['last_price'])
+            volume = float(coin['volume'])
+            change = float(coin['change_24_hour'])
 
-# Step 2: Feature Engineering
-df["Volatility %"] = (df["high"] - df["low"]) / df["low"] * 100
-df["Liquidity Ratio"] = df["volume"] / (df["market_cap"] + 1)  # Normalize liquidity
-df["Whale Activity"] = df["whale_transactions"] / (df["transactions"] + 1)
-df["Explosion Label"] = (df["price_change_24h"] > 20).astype(int)  # Label for training
+            if change > 5 and volume > 500000:  # Trade filter
+                target_price = calculate_target_price(price, change, volume)
+                stop_loss_price = calculate_stop_loss(price, change)
+                volatility = calculate_volatility(change, volume)
 
-# Select relevant features for the model
-features = ["Volatility %", "Liquidity Ratio", "Whale Activity"]
-X = df[features]
-y = df["Explosion Label"]
+                # AI Prediction
+                prediction, probability = predict_price_explosion(model, scaler, price, volume, change, volatility)
 
-# Step 3: Train the AI Model (RandomForestClassifier)
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+                if prediction == 1:
+                    trade_decision = f"🔥 High Confidence Buy (Explosive Probability: {probability}%)"
+                else:
+                    trade_decision = f"⚠️ Low Confidence (Explosive Probability: {probability}%)"
 
-# Normalize data
-scaler = StandardScaler()
-X_train = scaler.fit_transform(X_train)
-X_test = scaler.transform(X_test)
+                potential_explosions.append({
+                    "Symbol": symbol, "Price": price, "24h Change (%)": change,
+                    "Volume": volume, "Volatility (%)": volatility,
+                    "Target Price": target_price, "Stop Loss Price": stop_loss_price,
+                    "Explosive Probability (%)": probability, "Trade Decision": trade_decision
+                })
+        except (ValueError, KeyError):
+            continue
+    return potential_explosions
 
-# Train Random Forest Classifier
-model = RandomForestClassifier(n_estimators=100, random_state=42)
-model.fit(X_train, y_train)
+# Load the model if it exists
+try:
+    model = joblib.load('crypto_explosion_model.pkl')
+    scaler = joblib.load('scaler.pkl')
+except:
+    model, scaler = None, None
 
-# Step 4: Make Predictions with the Model
-df["AI Explosive Potential (%)"] = model.predict_proba(df[features])[:, 1] * 100
-df["Smart Money Score"] = df["whale_transactions"] / (df["transactions"] + 1)
-df["Target Price"] = df["price"] * 1.5  # Example 50% target price
-df["Stop Loss"] = df["price"] * 0.9  # Example 10% stop loss
+# Streamlit dynamic updates
+placeholder = st.empty()
 
-# Step 5: Display the DataFrame in Streamlit
-st.subheader("📊 AI-Identified 100x Gem Cryptos")
-st.dataframe(df[["name", "Volatility %", "AI Explosive Potential (%)", "Smart Money Score", "Target Price", "Stop Loss"]])
-
-# Step 6: Visualize AI Predictions (Optional)
-st.subheader("📈 Volatility vs. AI Prediction")
-st.scatter_chart(df[["Volatility %", "AI Explosive Potential (%)"]])
-
-# Step 7: Add Real-Time Alerts (Optional)
-if st.button("Get Alerts for Explosive Coins"):
-    high_potential_gems = df[df["AI Explosive Potential (%)"] > 70]  # Show only high-potential coins
-    st.write("🚀 High Potential 100x Gems:")
-    st.dataframe(high_potential_gems[["name", "AI Explosive Potential (%)", "Target Price", "Stop Loss"]])
-
+while True:
+    data = fetch_coindcx_data()
+    
+    # Retrain the model with new data periodically
+    if data and model and scaler:
+        analyzed_data = analyze_market(model, scaler, data)
+        if analyzed_data:
+            df = pd.DataFrame(analyzed_data)
+            with placeholder.container():
+                st.subheader("📈 Cryptos Likely to Explode Soon")
+                st.dataframe(df)
+        else:
+            with placeholder.container():
+                st.info("No potential explosive cryptos detected right now.")
+    else:
+        # If model is not available, train it
+        st.write("Training model with live data...")
+        model, scaler = train_model(data)
+    
+    # Sleep to control update frequency
+    time.sleep(60)  # Retrain every minute (or set based on your requirements)
