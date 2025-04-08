@@ -1,16 +1,17 @@
 import streamlit as st
 import pandas as pd
 import requests
-import time
 
 st.set_page_config(page_title="Crypto Explosive Detector", layout="wide")
 st.title("1000% Win Rate Crypto Explosion Detector")
 
 # User-configurable settings
-min_volume_threshold = 5000000  # Minimum volume for a coin to be considered
-price_spike_threshold = 0.10    # 10% price change in 1 min
+min_volume_threshold = 5000000  # Minimum volume
+price_spike_threshold = 0.10    # 10% spike in last candle
 
-# Function to fetch tokens dynamically from CoinDCX
+# 🔁 User-defined number of green candles
+green_candle_count = st.sidebar.slider("Number of Consecutive Green Candles", min_value=2, max_value=6, value=3)
+
 @st.cache_data(ttl=300)
 def fetch_tokens():
     url = "https://api.coindcx.com/exchange/ticker"
@@ -19,25 +20,23 @@ def fetch_tokens():
     tokens = [item['market'] for item in data if item['market'].endswith("INR")]
     return tokens
 
-# Function to simulate price and volume data (Replace this with real-time API for production)
+# Simulated data — replace with real API for production
 def simulate_data(token):
-    prices = [100, 105, 115, 125]  # Simulated prices for the last 4 minutes
-    volumes = [4_000_000, 5_000_000, 6_000_000, 7_000_000]  # Simulated volumes
+    prices = [100 + i * 5 for i in range(green_candle_count + 1)]  # Prices increasing
+    volumes = [4_000_000 + i * 1_000_000 for i in range(green_candle_count + 1)]  # Volumes increasing
     return prices, volumes
 
-# Function to detect explosive moves
+# Detect explosive or bullish patterns
 def detect_explosive_moves(token):
     prices, volumes = simulate_data(token)
-    
-    # Explosive move: sudden price spike
+
+    # Check recent price spike
     price_spike = (prices[-1] - prices[-2]) / prices[-2] > price_spike_threshold
-    
-    # Volume confirmation
     is_volume_high = volumes[-1] > min_volume_threshold
 
-    # 3 Green Candles Detection
-    green_candles = prices[-1] > prices[-2] > prices[-3] > prices[-4]
-    volume_bullish = volumes[-1] > volumes[-2] > volumes[-3] > volumes[-4]
+    # Dynamic green candles check
+    green_candles = all(prices[i] > prices[i - 1] for i in range(-1, -green_candle_count - 1, -1))
+    bullish_volumes = all(volumes[i] > volumes[i - 1] for i in range(-1, -green_candle_count - 1, -1))
 
     if price_spike and is_volume_high:
         return {
@@ -48,28 +47,28 @@ def detect_explosive_moves(token):
             "stoploss": round(prices[-1] * 0.95, 2),
             "target": round(prices[-1] * 1.10, 2)
         }
-    elif green_candles and volume_bullish:
+    elif green_candles and bullish_volumes:
         return {
             "token": token,
-            "type": "3 Green Candles with Bullish Volume",
+            "type": f"{green_candle_count} Green Candles with Bullish Volume",
             "price": prices[-1],
             "volume": volumes[-1],
-            "stoploss": round(prices[-2], 2),
+            "stoploss": round(prices[-green_candle_count], 2),
             "target": round(prices[-1] * 1.08, 2)
         }
     return None
 
-# Fetch all tokens
+# Fetch tokens
 tokens = fetch_tokens()
 
-# Analyze tokens
+# Analyze
 results = []
-for token in tokens[:100]:  # Limit to first 100 tokens for speed
+for token in tokens[:100]:
     result = detect_explosive_moves(token)
     if result:
         results.append(result)
 
-# Display results
+# Show output
 if results:
     st.success(f"{len(results)} potential explosive moves detected!")
     df = pd.DataFrame(results)
