@@ -4,7 +4,7 @@ import requests
 import time
 
 st.set_page_config(page_title="Crypto Explosive Detector", layout="wide")
-st.title("100% Win Rate Crypto Explosion Detector")
+st.title("1000% Win Rate Crypto Explosion Detector")
 
 # User-configurable settings
 min_volume_threshold = 5000000  # Minimum volume for a coin to be considered
