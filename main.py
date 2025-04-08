@@ -7,7 +7,7 @@ st.title("100% Win Rate Crypto Explosion Detector")
 
 # User-configurable settings
 min_volume_threshold = 5000000  # Minimum volume
-price_spike_threshold = 0.10    # 10% spike in last candle
+price_spike_threshold = 0.04    # 10% spike in last candle
 
 # 🔁 User-defined number of green candles
 green_candle_count = st.sidebar.slider("Number of Consecutive Green Candles", min_value=2, max_value=6, value=3)
